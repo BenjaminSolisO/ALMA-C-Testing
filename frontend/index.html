@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Policy Calibration Tool — NK Model</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="header-left">
+    <span class="header-title">NK Policy Calibration</span>
+    <span class="header-sub">New Keynesian · 4-Equation Model · Impulse Responses</span>
+  </div>
+  <div class="header-right">
+    <span class="shock-label">Shock</span>
+    <div class="shock-btns">
+      <button class="shock-btn active" id="btn-demand">Demand (u<sup style="font-size:8px">D</sup>)</button>
+      <button class="shock-btn" id="btn-monetary">Monetary (ε<sup style="font-size:8px">r</sup>)</button>
+    </div>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- Equations -->
+    <div class="sidebar-section">
+      <div class="section-heading">Model Equations</div>
+      <div class="equation-block">
+        <div class="eq-name">IS · Euler Equation</div>
+        <div class="eq-text">c<sub>t</sub> = c<sub>t+1</sub> − σ(r<sub>t</sub> − π<sub>t+1</sub>) + u<sup>D</sup><sub>t</sub></div>
+      </div>
+      <div class="equation-block">
+        <div class="eq-name">AS · Phillips Curve</div>
+        <div class="eq-text">π<sub>t</sub> = βπ<sub>t+1</sub> + λy<sub>t</sub></div>
+      </div>
+      <div class="equation-block">
+        <div class="eq-name">MP · Policy Rule</div>
+        <div class="eq-text">r<sub>t</sub> = ρr<sub>t+1</sub> + (1−ρ)φπ<sub>t</sub> + ε<sup>r</sup><sub>t</sub></div>
+      </div>
+      <div class="equation-block">
+        <div class="eq-name">Goods Market</div>
+        <div class="eq-text">c<sub>t</sub> = y<sub>t</sub></div>
+      </div>
+    </div>
+
+    <!-- Parameters -->
+    <div class="sidebar-section" style="flex:1;">
+      <div class="section-heading">Parameters</div>
+
+      <!-- σ -->
+      <div class="param-row" id="row-sigma">
+        <div class="param-header">
+          <div class="param-left">
+            <span class="param-name">σ</span>
+            <span class="param-desc">Intertemporal elasticity</span>
+            <span class="tooltip-icon">?
+              <span class="tooltip-box">Elasticity of intertemporal substitution. Higher σ means consumption responds more strongly to real interest rate changes. Standard calibration: σ ∈ [0.5, 2].</span>
+            </span>
+          </div>
+          <span class="param-value" id="val-sigma">1.00</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="sl-sigma" min="0.1" max="3" step="0.05" value="1.0">
+          <div class="slider-bounds"><span class="slider-bound">0.1</span><span class="slider-bound">3.0</span></div>
+        </div>
+      </div>
+
+      <!-- β -->
+      <div class="param-row" id="row-beta">
+        <div class="param-header">
+          <div class="param-left">
+            <span class="param-name">β</span>
+            <span class="param-desc">Discount factor</span>
+            <span class="tooltip-icon">?
+              <span class="tooltip-box">Household discount factor. Controls how much future inflation affects current pricing decisions. Typically calibrated to β ≈ 0.99 at quarterly frequency.</span>
+            </span>
+          </div>
+          <span class="param-value" id="val-beta">0.99</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="sl-beta" min="0.8" max="0.999" step="0.001" value="0.99">
+          <div class="slider-bounds"><span class="slider-bound">0.80</span><span class="slider-bound">0.999</span></div>
+        </div>
+      </div>
+
+      <!-- λ -->
+      <div class="param-row" id="row-lambda">
+        <div class="param-header">
+          <div class="param-left">
+            <span class="param-name">λ</span>
+            <span class="param-desc">Slope of Phillips curve</span>
+            <span class="tooltip-icon">?
+              <span class="tooltip-box">Sensitivity of inflation to the output gap. Related to price stickiness: lower λ implies more rigid prices. Empirical estimates range widely: λ ∈ [0.01, 0.3].</span>
+            </span>
+          </div>
+          <span class="param-value" id="val-lambda">0.10</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="sl-lambda" min="0.01" max="0.5" step="0.01" value="0.1">
+          <div class="slider-bounds"><span class="slider-bound">0.01</span><span class="slider-bound">0.50</span></div>
+        </div>
+      </div>
+
+      <!-- ρ -->
+      <div class="param-row" id="row-rho">
+        <div class="param-header">
+          <div class="param-left">
+            <span class="param-name">ρ</span>
+            <span class="param-desc">Interest rate smoothing</span>
+            <span class="tooltip-icon">?
+              <span class="tooltip-box">Degree of interest rate inertia in the policy rule. ρ = 0 means no smoothing (pure contemporaneous rule); ρ → 1 means highly gradual adjustment. Empirically ≈ 0.7–0.9.</span>
+            </span>
+          </div>
+          <span class="param-value" id="val-rho">0.75</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="sl-rho" min="0" max="0.98" step="0.01" value="0.75">
+          <div class="slider-bounds"><span class="slider-bound">0</span><span class="slider-bound">0.98</span></div>
+        </div>
+      </div>
+
+      <!-- φ -->
+      <div class="param-row" id="row-phi">
+        <div class="param-header">
+          <div class="param-left">
+            <span class="param-name">φ</span>
+            <span class="param-desc">Inflation response coeff.</span>
+            <span class="tooltip-icon">?
+              <span class="tooltip-box">Coefficient on inflation in the policy rule (Taylor principle). Taylor principle requires φ > 1 for determinacy. Higher φ = more aggressive anti-inflation stance.</span>
+            </span>
+          </div>
+          <span class="param-value" id="val-phi">1.50</span>
+        </div>
+        <div class="slider-wrap">
+          <input type="range" id="sl-phi" min="0.5" max="4" step="0.05" value="1.5">
+          <div class="slider-bounds"><span class="slider-bound">0.5</span><span class="slider-bound">4.0</span></div>
+        </div>
+      </div>
+
+      <div class="param-row" style="margin-top:8px;">
+        <div class="horizon-wrap">
+          <span class="horizon-label">Horizon</span>
+          <div class="horizon-btns">
+            <button class="hz-btn" data-h="1">1Q</button>
+            <button class="hz-btn" data-h="2">2Q</button>
+            <button class="hz-btn" data-h="3">3Q</button>
+            <button class="hz-btn" data-h="4">4Q</button>
+            <button class="hz-btn" data-h="8">8Q</button>
+            <button class="hz-btn" data-h="12">12Q</button>
+            <button class="hz-btn" data-h="16">16Q</button>
+            <button class="hz-btn active" data-h="24">24Q</button>
+            <button class="hz-btn" data-h="40">40Q</button>
+          </div>
+        </div>
+      </div>
+
+      <button class="reset-btn" id="reset-btn">↺ Reset to Defaults</button>
+    </div>
+
+  </aside>
+
+  <!-- RIGHT CHARTS -->
+  <div class="charts-area">
+    <div class="charts-header">
+      <span class="charts-title">Impulse Response Functions</span>
+      <div class="legend-items">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--c-y)"></div>Output (y)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--c-pi)"></div>Inflation (π)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--c-r)"></div>Interest rate (r)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--c-c)"></div>Consumption (c)</div>
+      </div>
+    </div>
+    <div class="charts-grid">
+      <div class="chart-cell">
+        <div class="chart-cell-header">
+          <span class="chart-var" style="color:var(--c-y)">y<sub>t</sub></span>
+          <span class="chart-var-label">Output gap</span>
+          <span class="chart-peak" id="peak-y">—</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="ch-y"></canvas></div>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-cell-header">
+          <span class="chart-var" style="color:var(--c-pi)">π<sub>t</sub></span>
+          <span class="chart-var-label">Inflation</span>
+          <span class="chart-peak" id="peak-pi">—</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="ch-pi"></canvas></div>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-cell-header">
+          <span class="chart-var" style="color:var(--c-r)">r<sub>t</sub></span>
+          <span class="chart-var-label">Nominal interest rate</span>
+          <span class="chart-peak" id="peak-r">—</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="ch-r"></canvas></div>
+      </div>
+      <div class="chart-cell">
+        <div class="chart-cell-header">
+          <span class="chart-var" style="color:var(--c-c)">c<sub>t</sub></span>
+          <span class="chart-var-label">Consumption (= y<sub>t</sub>)</span>
+          <span class="chart-peak" id="peak-c">—</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="ch-c"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="solver.js"></script>
+</body>
+</html>
