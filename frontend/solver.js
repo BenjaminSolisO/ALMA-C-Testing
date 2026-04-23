@@ -4,41 +4,98 @@ const DEFAULTS = {
   shockAmp: 1.0, rhoShock: 0.85
 };
 let params = { ...DEFAULTS };
-let shockType = 'demand'; // 'demand' | 'monetary'
+let shockType = 'demand';
 let horizon = 24;
 
 const TWEAK_DEFAULTS = { chartThickness: 2 };
 let tweaks = { ...TWEAK_DEFAULTS };
 
-// ─── SOLVE MODEL (backward recursion + AR(1) shocks) ─────────────────────────
-// Shock process: shock_t = rhoShock^t * shockAmp
-// With rhoShock > 0, future periods are non-zero → beta affects dynamics.
-// With rhoShock = 0, reverts to pure one-period impulse.
-function solveIRFTweaked(p, T, shock) {
+// ─── SOLVE: Blanchard-Kahn via full-path LU decomposition ────────────────────
+//
+// Model (Galí 2008):
+//   IS:  y_t  = y_{t+1} - σ(r_t - π_{t+1}) + u_t
+//   PC:  π_t  = β π_{t+1} + λ y_t
+//   MP:  r_t  = ρ r_{t-1} + (1-ρ)φ π_t + ε_t   ← backward Taylor (Galí 2008)
+//   GM:  c_t  = y_t
+//
+// Shocks: AR(1) — shock_t = ρ_ε^t · ε₀
+// Boundary: y_T = π_T = 0 (terminal),  r_{-1} = 0 (initial)
+//
+// Cast as linear system A·x = b of size 3(T+1) × 3(T+1).
+// Variables: x = [y₀,π₀,r₀, y₁,π₁,r₁, ..., y_T,π_T,r_T]
+// Solved via math.lusolve (LU decomposition, Blanchard-Kahn equivalent).
+
+function computeT(h, rhoShock) {
+  const decay = Math.max(20, Math.ceil(Math.log(0.001) / Math.log(rhoShock + 1e-10)));
+  return h + Math.min(decay, 500); // cap at h+500 for browser performance
+}
+
+function solveIRFBK(p, h, shock) {
   const { sigma, beta, lambda, rho, phi, shockAmp, rhoShock } = p;
+  const T = computeT(h, rhoShock);
   const N = T + 1;
-  const y  = new Array(N).fill(0);
-  const pi = new Array(N).fill(0);
-  const r  = new Array(N).fill(0);
+  const n = 3 * N;
 
-  const denom = (1 / lambda) + sigma * (1 - rho) * phi;
+  // AR(1) shock paths
+  const u   = Array.from({length: N}, (_, t) => shock === 'demand'   ? Math.pow(rhoShock, t) * shockAmp : 0);
+  const eps = Array.from({length: N}, (_, t) => shock === 'monetary' ? Math.pow(rhoShock, t) * shockAmp : 0);
 
-  const u_demand = (t) => shock === 'demand'   ? Math.pow(rhoShock, t) * shockAmp : 0;
-  const eps_r    = (t) => shock === 'monetary' ? Math.pow(rhoShock, t) * shockAmp : 0;
+  // Variable index: y_t → 3t, π_t → 3t+1, r_t → 3t+2
+  const idx = (t, k) => 3 * t + k;
 
-  for (let t = T - 1; t >= 0; t--) {
-    const y1 = y[t + 1], pi1 = pi[t + 1], r1 = r[t + 1];
-    const rhs = y1 + sigma * pi1 - sigma * rho * r1 + (beta * pi1 / lambda)
-              + u_demand(t) - sigma * eps_r(t);
-    pi[t] = rhs / denom;
-    r[t]  = rho * r1 + (1 - rho) * phi * pi[t] + eps_r(t);
-    y[t]  = (pi[t] - beta * pi1) / lambda;
+  const A = Array.from({length: n}, () => new Array(n).fill(0));
+  const b = new Array(n).fill(0);
+  let eq = 0;
+
+  // IS at t=0,...,T-1:  y_t - y_{t+1} + σ r_t - σ π_{t+1} = u[t]
+  for (let t = 0; t < T; t++, eq++) {
+    A[eq][idx(t,   0)] =  1;
+    A[eq][idx(t+1, 0)] = -1;
+    A[eq][idx(t,   2)] =  sigma;
+    A[eq][idx(t+1, 1)] = -sigma;
+    b[eq] = u[t];
   }
+
+  // PC at t=0,...,T-1:  -λ y_t + π_t - β π_{t+1} = 0
+  for (let t = 0; t < T; t++, eq++) {
+    A[eq][idx(t,   0)] = -lambda;
+    A[eq][idx(t,   1)] =  1;
+    A[eq][idx(t+1, 1)] = -beta;
+    b[eq] = 0;
+  }
+
+  // MP at t=0:  r₀ - (1-ρ)φ π₀ = ε[0]   [r_{-1} = 0]
+  A[eq][idx(0, 2)] =  1;
+  A[eq][idx(0, 1)] = -(1 - rho) * phi;
+  b[eq] = eps[0];
+  eq++;
+
+  // MP at t=1,...,T:  r_t - ρ r_{t-1} - (1-ρ)φ π_t = ε[t]
+  for (let t = 1; t <= T; t++, eq++) {
+    A[eq][idx(t,   2)] =  1;
+    A[eq][idx(t-1, 2)] = -rho;
+    A[eq][idx(t,   1)] = -(1 - rho) * phi;
+    b[eq] = eps[t];
+  }
+
+  // Terminal: y_T = 0
+  A[eq][idx(T, 0)] = 1;  b[eq] = 0;  eq++;
+
+  // Terminal: π_T = 0
+  A[eq][idx(T, 1)] = 1;  b[eq] = 0;  eq++;
+
+  // Solve via LU decomposition
+  const x = math.lusolve(A, b);
+
+  const y  = Array.from({length: N}, (_, t) => x[idx(t, 0)][0]);
+  const pi = Array.from({length: N}, (_, t) => x[idx(t, 1)][0]);
+  const r  = Array.from({length: N}, (_, t) => x[idx(t, 2)][0]);
+
   return { y, pi, r, c: [...y] };
 }
 
 // ─── CHART HELPERS ────────────────────────────────────
-const CHART_OPTS = (color) => ({
+const CHART_OPTS = () => ({
   responsive: true,
   maintainAspectRatio: false,
   animation: { duration: 180 },
@@ -98,7 +155,7 @@ function makeChart(canvasId, color) {
   return new Chart(ctx, {
     type: 'line',
     data: { labels: [], datasets: [makeDataset([], color)] },
-    options: CHART_OPTS(color)
+    options: CHART_OPTS()
   });
 }
 
@@ -116,9 +173,8 @@ function fmt(v) {
 }
 
 function update() {
-  const T = horizon + 5;
-  const irf = solveIRFTweaked(params, T, shockType);
-  const labels = Array.from({ length: horizon }, (_, i) => i);
+  const irf = solveIRFBK(params, horizon, shockType);
+  const labels = Array.from({length: horizon}, (_, i) => i);
 
   ['y', 'pi', 'r', 'c'].forEach(key => {
     const data = irf[key].slice(0, horizon);
@@ -238,12 +294,7 @@ function buildTweakPanel() {
 }
 
 window.addEventListener('message', e => {
-  if (e.data?.type === '__activate_edit_mode') {
-    buildTweakPanel();
-    tweakPanel.style.display = 'block';
-  }
-  if (e.data?.type === '__deactivate_edit_mode' && tweakPanel) {
-    tweakPanel.style.display = 'none';
-  }
+  if (e.data?.type === '__activate_edit_mode') { buildTweakPanel(); tweakPanel.style.display = 'block'; }
+  if (e.data?.type === '__deactivate_edit_mode' && tweakPanel) tweakPanel.style.display = 'none';
 });
 window.parent.postMessage({ type: '__edit_mode_available' }, '*');
